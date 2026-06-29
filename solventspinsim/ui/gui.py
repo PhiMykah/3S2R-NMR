@@ -319,9 +319,9 @@ class GUI:
     def _on_visibility_toggle(
         self, sender: Any, app_data: bool, user_data: str
     ) -> None:
-        nf = self._mgr.get(user_data)
-        if nf:
-            nf.set_visible(app_data)
+        f = self._mgr.get(user_data)
+        if f:
+            f.set_visible(app_data)
             self._refresh_main_plot()
 
     # ---------------------------- window construction --------------------------- #

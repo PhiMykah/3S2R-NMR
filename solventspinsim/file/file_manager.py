@@ -41,8 +41,14 @@ class FileManager:
     def remove_spin(self, spin_id: str) -> None:
         self._spins.pop(spin_id, None)
 
-    def get(self, file_id: str) -> NMRFile | None:
-        return self._files.get(file_id)
+    def get(self, key_id: str) -> NMRFile | SpinFile | None:
+        file = self._files.get(key_id) 
+        spin = self._spins.get(key_id)
+        if file is not None:
+            return file
+        if spin is not None:
+            return spin
+        return None
     
     def get_spins(self, spin_id: str) -> SpinFile | None:
         return self._spins.get(spin_id)
