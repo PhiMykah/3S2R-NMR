@@ -48,6 +48,9 @@ class GUI:
         self._context_created: bool = False
         self._viewport_created: bool = False
         self._dark_mode: bool = settings.is_dark_mode()
+        self._selected_spin_id: str | None = None
+        self._spin_selector_lookup: dict[str, str] = {}
+        self._spin_selector_parent_tag: str | int | None = None
 
     # ----------------------------- getters / setters ---------------------------- #
     def get_title(self) -> str:
@@ -92,6 +95,7 @@ class GUI:
 
         self._mgr.add(path, data)
         self._refresh_all()
+        self._recenter_main_plot()
 
     def _load_nmr_file_dialog_callback(
         self,
@@ -114,9 +118,10 @@ class GUI:
         except Exception as exc:
             print(f"[Error] Could not load {path}: {exc}")
             return
-        
+
         self._mgr.add_spin(path, data)
         self._refresh_all()
+        self._recenter_main_plot()
 
     def _load_spin_file_dialog_callback(
         self,
@@ -130,6 +135,64 @@ class GUI:
         self._refresh_file_list()
 
     # ------------------------------- plot refresh ------------------------------- #
+    def _recenter_main_plot(self) -> None:
+        """Fit both axes to the visible data so the plot recenters after a load."""
+        if dpg.does_item_exist("main_plot_xaxis"):
+            dpg.fit_axis_data("main_plot_xaxis")
+        if dpg.does_item_exist("main_plot_yaxis"):
+            dpg.fit_axis_data("main_plot_yaxis")
+
+    def _get_active_spin_ids(self) -> list[str]:
+        """Return the currently selected spin ids from the UI selector."""
+        if not dpg.does_item_exist("spin_selection_combo"):
+            return [self._selected_spin_id] if self._selected_spin_id else []
+
+        combo_value = dpg.get_value("spin_selection_combo")
+        if isinstance(combo_value, str) and "|" in combo_value:
+            _, spin_id = combo_value.rsplit("|", 1)
+            return [spin_id] if spin_id else []
+        if isinstance(combo_value, str) and combo_value in self._spin_selector_lookup:
+            return [self._spin_selector_lookup[combo_value]]
+        return [self._selected_spin_id] if self._selected_spin_id else []
+
+    def _refresh_spin_selector(self, parent: str | None = None) -> None:
+        """Rebuild the spin-selection combo box from currently loaded spin files."""
+        if dpg.does_item_exist("spin_selection_combo"):
+            dpg.delete_item("spin_selection_combo")
+
+        spin_files = self._mgr.list_spins()
+        self._spin_selector_lookup = {}
+        if not spin_files:
+            self._selected_spin_id = None
+            return
+
+        if self._selected_spin_id not in {sf.get_id() for sf in spin_files}:
+            self._selected_spin_id = spin_files[0].get_id()
+
+        items: list[str] = []
+        selected_label = ""
+        for sf in spin_files:
+            label = sf.get_label()
+            self._spin_selector_lookup[label] = sf.get_id()
+            items.append(label)
+            if sf.get_id() == self._selected_spin_id:
+                selected_label = label
+
+        if not selected_label:
+            selected_label = items[0]
+            self._selected_spin_id = self._spin_selector_lookup[selected_label]
+
+        combo_parent = parent or self._spin_selector_parent_tag
+        if combo_parent is not None:
+            dpg.add_combo(
+                items=items,
+                tag="spin_selection_combo",
+                default_value=selected_label,
+                callback=self._on_spin_selection_changed,
+                width=180,
+                parent=combo_parent,
+            )
+
     def _refresh_main_plot(self) -> None:
         """Delete and re-add all line series on the main plot."""
         # clear existing series
@@ -164,6 +227,7 @@ class GUI:
             )
             dpg.bind_item_theme(series_tag, series_theme)
 
+        active_spin_ids = set(self._get_active_spin_ids())
         for sf in self._mgr.list_spins():
             if not sf.is_visible():
                 continue
@@ -176,12 +240,17 @@ class GUI:
                         category=dpg.mvThemeCat_Plots,
                     )
 
-            spin = sf.get_data() 
-            spin.intensities = [ dpg.get_value("peak_intensity") ] * spin._nuclei_number
-            spin.field_strength = dpg.get_value("field_strength")
-            spin.nuclei_frequencies = spin._ppm_nuclei_frequencies
+            spin = sf.get_data()
+            if sf.get_id() in active_spin_ids:
+                spin.intensities = [dpg.get_value("peak_intensity")] * spin._nuclei_number
+                spin.field_strength = dpg.get_value("field_strength")
+                spin.nuclei_frequencies = spin._ppm_nuclei_frequencies
 
-            spin_array = _simulate_spin(sf.get_data(), dpg.get_value("num_of_points"), dpg.get_value("hhw"))
+            spin_array = _simulate_spin(
+                spin,
+                dpg.get_value("num_of_points"),
+                dpg.get_value("hhw"),
+            )
             if spin_array is None:
                 continue
             dpg.add_line_series(
@@ -315,6 +384,8 @@ class GUI:
                 )
 
     def _refresh_all(self) -> None:
+        self._spin_selector_parent_tag = "target_spin_group"
+        self._refresh_spin_selector(parent=self._spin_selector_parent_tag)
         self._refresh_main_plot()
         self._refresh_subplot_row()
         self._refresh_file_list()
@@ -330,6 +401,20 @@ class GUI:
         if f:
             f.set_visible(app_data)
             self._refresh_main_plot()
+
+    def _on_spin_selection_changed(
+        self, sender: Any = None, app_data: Any = None, user_data: Any = None
+    ) -> None:
+        if isinstance(app_data, str) and app_data in self._spin_selector_lookup:
+            self._selected_spin_id = self._spin_selector_lookup[app_data]
+        elif isinstance(app_data, str) and "|" in app_data:
+            _, spin_id = app_data.rsplit("|", 1)
+            self._selected_spin_id = spin_id if spin_id else None
+        else:
+            self._selected_spin_id = None
+
+        self._refresh_main_plot()
+        self._recenter_main_plot()
 
     # ---------------------------- window construction --------------------------- #
     def _build_nmr_file_dialog(self) -> None:
@@ -416,6 +501,11 @@ class GUI:
         sim_settings_window = ChildWindow(tag="sim_settings_window", height=280, border=True)
         sim_settings_window.add_child(Text("Simulation Settings"))
         sim_settings_window.add_child(Separator())
+        target_spin_group = Group(horizontal=True, tag="target_spin_group")
+        target_spin_group.add_child(Text("Target Spin:"))
+        sim_settings_window.add_child(target_spin_group)
+        sim_settings_window.add_child(Separator())
+        self._refresh_spin_selector(parent="sim_settings_window")
 
         def _add_float_row(label: str, value_tag: str, default: float = 0.0, step: float = 1.0) -> None:
             row = Group()
