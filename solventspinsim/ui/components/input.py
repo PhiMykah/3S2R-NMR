@@ -52,3 +52,36 @@ class Separator(Component):
         if parent is not None:
             kwargs["parent"] = parent
         dpg.add_separator(**kwargs)
+
+
+class InputFloat(iComponent):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    def submit(self, parent: int | str | None = None) -> None:
+        kwargs = {k: v for k, v in self._kwargs.items() if k not in ("tag",)}
+        if parent is not None:
+            kwargs["parent"] = parent
+        dpg.add_input_float(tag=self.tag, **kwargs)
+
+
+class DragFloat(iComponent):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    def submit(self, parent: int | str | None = None) -> None:
+        kwargs = {k: v for k, v in self._kwargs.items() if k not in ("tag",)}
+        if parent is not None:
+            kwargs["parent"] = parent
+        dpg.add_drag_float(tag=self.tag, **kwargs)
+
+
+class InputText(iComponent):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    def submit(self, parent: int | str | None = None) -> None:
+        kwargs = {k: v for k, v in self._kwargs.items() if k not in ("tag",)}
+        if parent is not None:
+            kwargs["parent"] = parent
+        dpg.add_input_text(tag=self.tag, **kwargs)

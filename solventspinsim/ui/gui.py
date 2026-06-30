@@ -10,6 +10,10 @@ from solventspinsim.parse.settings import Settings
 from solventspinsim.spin import Spin, _simulate_spin
 from solventspinsim.theme.themes import _SUBPLOT_BORDER_COLORS, Theme
 
+from .components.container import ChildWindow, Group, Window
+from .components.input import Button, Checkbox, DragFloat, InputFloat, Separator, Text # InputText
+from .components.menu import Menu, MenuBar, MenuItem
+from .components.plot import Plot, PlotAxis, PlotLegend
 from .fonts.font_handler import _try_load_font
 
 # ---------------------------------------------------------------------------- #
@@ -290,7 +294,7 @@ class GUI:
                     label=nf.get_label(),
                     default_value=nf.is_visible(),
                     callback=self._on_visibility_toggle,
-                    user_data=nf.get_id(),
+                    user_data=(nf.get_id(), "NMRFile"),
                 )
 
         for sf in spin_files:
@@ -307,7 +311,7 @@ class GUI:
                     label=sf.get_label(),
                     default_value=sf.is_visible(),
                     callback=self._on_visibility_toggle,
-                    user_data=sf.get_id(),
+                    user_data=(sf.get_id(), "SpinFile"),
                 )
 
     def _refresh_all(self) -> None:
@@ -317,9 +321,12 @@ class GUI:
 
     # --------------------------------- callbacks -------------------------------- #
     def _on_visibility_toggle(
-        self, sender: Any, app_data: bool, user_data: str
+        self, sender: Any, app_data: bool, user_data: tuple[str, str]
     ) -> None:
-        f = self._mgr.get(user_data)
+        if user_data[1].lower() == "SpinFile".lower():
+            f = self._mgr.get_spins(user_data[0])
+        else:
+            f = self._mgr.get_nmr(user_data[0])
         if f:
             f.set_visible(app_data)
             self._refresh_main_plot()
@@ -365,185 +372,113 @@ class GUI:
         self._build_spin_file_dialog()
 
         # ------------------------------ primary window ------------------------------ #
-        with dpg.window(
-            tag="main_window",
-            label="Primary Window",
-            no_scrollbar=True,
-        ):
-            # --------------------------------- menu bar --------------------------------- #
-            with dpg.menu_bar(tag="menu_bar"):
-                with dpg.menu(label="File", tag="menu_file"):
-                    dpg.add_menu_item(
-                        label="Exit",
-                        callback=lambda: dpg.stop_dearpygui(),
-                    )
-                with dpg.menu(label="Load", tag="menu_load"):
-                    dpg.add_menu_item(
-                        label="Load NMR File",
-                        callback=lambda: dpg.show_item("nmr_file_dialog"),
-                    )
-                    dpg.add_menu_item(
-                        label="Load Spin File",
-                        callback=lambda: dpg.show_item("spin_file_dialog")
-                    )
-                    dpg.add_menu_item(
-                        label="Clear All",
-                        callback=self._on_clear_all,
-                    )
-                with dpg.menu(label="Save", tag="menu_save"):
-                    dpg.add_menu_item(label="Save Spin Matrix (TODO)")
-                with dpg.menu(label="View", tag="menu_view"):
-                    dpg.add_menu_item(
-                        label="Toggle Light/Dark Mode",
-                        callback=self._toggle_theme,
-                    )
-                with dpg.menu(label="Help", tag="menu_help"):
-                    dpg.add_menu_item(label="About 3S2R NMR")
+        main_window = Window(tag="main_window", label="Primary Window", no_scrollbar=True)
 
-            # ------------ body: horizontal group (plots left, settings right) ----------- #
-            with dpg.group(horizontal=True, tag="body_group"):
+        menu_bar = MenuBar(tag="menu_bar")
+        file_menu = Menu(label="File", tag="menu_file")
+        file_menu.add_child(MenuItem(label="Exit", callback=lambda: dpg.stop_dearpygui()))
+        load_menu = Menu(label="Load", tag="menu_load")
+        load_menu.add_child(MenuItem(label="Load NMR File", callback=lambda: dpg.show_item("nmr_file_dialog")))
+        load_menu.add_child(MenuItem(label="Load Spin File", callback=lambda: dpg.show_item("spin_file_dialog")))
+        load_menu.add_child(MenuItem(label="Clear All", callback=self._on_clear_all))
+        save_menu = Menu(label="Save", tag="menu_save")
+        save_menu.add_child(MenuItem(label="Save Spin Matrix (TODO)"))
+        view_menu = Menu(label="View", tag="menu_view")
+        view_menu.add_child(MenuItem(label="Toggle Light/Dark Mode", callback=self._toggle_theme))
+        help_menu = Menu(label="Help", tag="menu_help")
+        help_menu.add_child(MenuItem(label="About 3S2R NMR"))
 
-                # ------------------- left column: main plot + subplot row ------------------- #
-                with dpg.child_window(
-                    tag="left_panel",
-                    width=-320,
-                    height=-1,
-                    no_scrollbar=True,
-                    border=False,
-                ):
-                    # --------------------------------- main plot -------------------------------- #
-                    with dpg.child_window(
-                        tag="main_plot_window",
-                        height=-180,
-                        no_scrollbar=True,
-                        border=False,
-                    ):
-                        with dpg.plot(
-                            tag="main_plot",
-                            label="Spectrum & Peaks",
-                            width=-1,
-                            height=-1,
-                            pan_button=dpg.mvMouseButton_Left,
-                        ):
-                            dpg.add_plot_legend()
-                            dpg.add_plot_axis(
-                                dpg.mvXAxis,
-                                label="Hz",
-                                tag="main_plot_xaxis",
-                            )
-                            dpg.add_plot_axis(
-                                dpg.mvYAxis,
-                                label="Intensity",
-                                tag="main_plot_yaxis",
-                            )
+        menu_bar.add_menu(file_menu)
+        menu_bar.add_menu(load_menu)
+        menu_bar.add_menu(save_menu)
+        menu_bar.add_menu(view_menu)
+        menu_bar.add_menu(help_menu)
+        main_window.add_child(menu_bar)
 
-                    # -------------------------------- subplot row ------------------------------- #
-                    with dpg.child_window(
-                        tag="subplot_row_window",
-                        height=-1,
-                        horizontal_scrollbar=True,
-                        border=False,
-                    ):
-                        with dpg.group(
-                            horizontal=True,
-                            tag="subplot_row_group",
-                        ):
-                            pass   # populated by _refresh_subplot_row
+        body_group = Group(tag="body_group", horizontal=True)
 
-                # ----------------------- right column: settings panel ----------------------- #
-                with dpg.child_window(
-                    tag="settings_panel",
-                    width=310,
-                    height=-1,
-                    border=False,
-                ):
-                    # ---------------------------- simulation settings --------------------------- #
-                    with dpg.child_window(
-                        tag="sim_settings_window",
-                        height=280,
-                        border=True,
-                    ):
-                        dpg.add_text("Simulation Settings")
-                        dpg.add_separator()
+        left_panel = ChildWindow(tag="left_panel", width=-320, height=-1, no_scrollbar=True, border=False)
+        main_plot_window = ChildWindow(tag="main_plot_window", height=-180, no_scrollbar=True, border=False)
+        main_plot = Plot(tag="main_plot", label="Spectrum & Peaks", width=-1, height=-1, pan_button=dpg.mvMouseButton_Left)
+        main_plot.add_child(PlotLegend(tag="main_plot_legend"))
+        main_plot.add_child(PlotAxis(dpg.mvXAxis, label="Hz", tag="main_plot_xaxis"))
+        main_plot.add_child(PlotAxis(dpg.mvYAxis, label="Intensity", tag="main_plot_yaxis"))
+        main_plot_window.add_child(main_plot)
 
-                        def _add_float_row(label: str, value_tag: str,
-                                           default: float = 0.0,
-                                           step: float = 1.0) -> None:
-                            dpg.add_text(label)
-                            with dpg.group(horizontal=True):
-                                dpg.add_input_float(
-                                    tag=value_tag,
-                                    default_value=default,
-                                    format="%.2f",
-                                    step=step,
-                                    step_fast=step * 10,
-                                    width=180,
-                                    callback=lambda: self._refresh_all()
-                                )
+        subplot_row_window = ChildWindow(tag="subplot_row_window", height=-1, horizontal_scrollbar=True, border=False)
+        subplot_row_group = Group(horizontal=True, tag="subplot_row_group")
+        subplot_row_window.add_child(subplot_row_group)
+        left_panel.add_child(main_plot_window)
+        left_panel.add_child(subplot_row_window)
+        body_group.add_child(left_panel)
 
-                        _add_float_row("Field Strength",   "field_strength",   500.0, 1.0)
-                        _add_float_row("Points",           "num_of_points",   1000.0, 1.0)
-                        _add_float_row("Intensity",        "peak_intensity",     1.0, 0.1)
-                        _add_float_row("Half-Height Width", "hhw",               1.0, 0.1)
+        settings_panel = ChildWindow(tag="settings_panel", width=310, height=-1, border=False)
+        sim_settings_window = ChildWindow(tag="sim_settings_window", height=280, border=True)
+        sim_settings_window.add_child(Text("Simulation Settings"))
+        sim_settings_window.add_child(Separator())
 
-                    # ------------------------- water simulation settings ------------------------ #
-                    with dpg.child_window(
-                        tag="water_sim_window",
-                        height=260,
-                        border=True,
-                    ):
-                        with dpg.group(horizontal=True):
-                            dpg.add_checkbox(
-                                tag="enable_water_sim",
-                                default_value=False,
-                            )
-                            dpg.add_text("Enable Water Simulation")
-                        dpg.add_separator()
+        def _add_float_row(label: str, value_tag: str, default: float = 0.0, step: float = 1.0) -> None:
+            row = Group()
+            row.add_child(Text(label))
+            row.add_child(
+                InputFloat(
+                    tag=value_tag,
+                    default_value=default,
+                    format="%.2f",
+                    step=step,
+                    step_fast=step * 10,
+                    width=180,
+                    callback=lambda: self._refresh_all(),
+                )
+            )
+            sim_settings_window.add_child(row)
 
-                        def _add_drag_row(label: str, tag: str,
-                                          default: float = 0.0) -> None:
-                            dpg.add_text(label)
-                            dpg.add_drag_float(
-                                tag=tag,
-                                default_value=default,
-                                format="%.2f",
-                                speed=0.1,
-                                width=230,
-                                callback=lambda: self._refresh_all()
-                            )
+        _add_float_row("Field Strength", "field_strength", 500.0, 1.0)
+        _add_float_row("Points", "num_of_points", 1000.0, 1.0)
+        _add_float_row("Intensity", "peak_intensity", 1.0, 0.1)
+        _add_float_row("Half-Height Width", "hhw", 1.0, 0.1)
 
-                        _add_drag_row("Water Left Limit",       "water_left_limit",   0.0)
-                        _add_drag_row("Water Right Limit",      "water_right_limit", 1000.0)
-                        _add_drag_row("Water Frequency",        "water_frequency",    0.0)
-                        _add_drag_row("Water Intensity",        "water_intensity",    1.0)
-                        _add_drag_row("Water Half-Height Width","water_hhw",          1.0)
+        water_sim_window = ChildWindow(tag="water_sim_window", height=260, border=True)
+        water_row = Group(horizontal=True)
+        water_row.add_child(Checkbox(tag="enable_water_sim", default_value=False))
+        water_row.add_child(Text("Enable Water Simulation"))
+        water_sim_window.add_child(water_row)
+        water_sim_window.add_child(Separator())
 
-                    # -------------------------- file list + action bar -------------------------- #
-                    with dpg.child_window(
-                        tag="file_actions_window",
-                        height=-1,
-                        border=True,
-                    ):
-                        with dpg.child_window(
-                            tag="file_list_panel",
-                            height=-60,
-                            border=False,
-                        ):
-                            dpg.add_text("(no files loaded)")
+        def _add_drag_row(label: str, tag: str, default: float = 0.0) -> None:
+            row = Group()
+            row.add_child(Text(label))
+            row.add_child(
+                DragFloat(
+                    tag=tag,
+                    default_value=default,
+                    format="%.2f",
+                    speed=0.1,
+                    width=230,
+                    callback=lambda: self._refresh_all(),
+                )
+            )
+            water_sim_window.add_child(row)
 
-                        dpg.add_separator()
-                        with dpg.group(horizontal=True):
-                            dpg.add_input_text(
-                                tag="file_path_hint",
-                                default_value="~/Projects/../Data",
-                                width=-90,
-                                enabled=False,
-                            )
-                            dpg.add_button(
-                                label="Optimize",
-                                width=-1,
-                                callback=self._on_optimize,
-                            )
+        _add_drag_row("Water Left Limit", "water_left_limit", 0.0)
+        _add_drag_row("Water Right Limit", "water_right_limit", 1000.0)
+        _add_drag_row("Water Frequency", "water_frequency", 0.0)
+        _add_drag_row("Water Intensity", "water_intensity", 1.0)
+        _add_drag_row("Water Half-Height Width", "water_hhw", 1.0)
+
+        file_actions_window = ChildWindow(tag="file_actions_window", height=-1, border=True)
+        file_list_panel = ChildWindow(tag="file_list_panel", height=-60, border=False)
+        file_list_panel.add_child(Text("(no files loaded)"))
+        file_actions_window.add_child(file_list_panel)
+        file_actions_window.add_child(Separator())
+        file_actions_window.add_child(Button(label="Optimize", width=-1, callback=self._on_optimize))
+
+        settings_panel.add_child(sim_settings_window)
+        settings_panel.add_child(water_sim_window)
+        settings_panel.add_child(file_actions_window)
+        body_group.add_child(settings_panel)
+        main_window.add_child(body_group)
+        main_window.submit()
 
         dpg.set_primary_window("main_window", True)
 
