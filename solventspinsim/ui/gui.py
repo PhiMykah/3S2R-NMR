@@ -51,6 +51,7 @@ class GUI:
         self._selected_spin_id: str | None = None
         self._spin_selector_lookup: dict[str, str] = {}
         self._spin_selector_parent_tag: str | int | None = None
+        self._interactive_handle_tags: set[str] = set()
 
     # ----------------------------- getters / setters ---------------------------- #
     def get_title(self) -> str:
@@ -142,6 +143,60 @@ class GUI:
         if dpg.does_item_exist("main_plot_yaxis"):
             dpg.fit_axis_data("main_plot_yaxis")
 
+    def _clear_interactive_handles(self) -> None:
+        """Remove draggable plot handles created for editing spin frequencies/couplings."""
+        for tag in list(self._interactive_handle_tags):
+            if dpg.does_item_exist(tag):
+                dpg.delete_item(tag)
+        self._interactive_handle_tags.clear()
+
+    def _get_selected_spin_file(self) -> Any | None:
+        if not self._selected_spin_id:
+            return None
+        return self._mgr.get_spins(self._selected_spin_id)
+
+    def _update_selected_spin_frequency(self, index: int, new_value_hz: float) -> None:
+        sf = self._get_selected_spin_file()
+        if sf is None:
+            return
+        spin = sf.get_data()
+        current_hz = [float(value) for value in spin.nuclei_frequencies]
+        if index < 0 or index >= len(current_hz):
+            return
+        current_hz[index] = new_value_hz
+        spin.nuclei_frequencies = [value / spin.field_strength for value in current_hz]
+        self._refresh_main_plot()
+
+    def _update_selected_spin_coupling(self, i: int, j: int, new_value_hz: float) -> None:
+        sf = self._get_selected_spin_file()
+        if sf is None:
+            return
+        spin = sf.get_data()
+        couplings = spin.couplings.copy()
+        couplings[i, j] = float(new_value_hz)
+        couplings[j, i] = float(new_value_hz)
+        spin.couplings = couplings
+        self._refresh_main_plot()
+
+    def _on_spin_frequency_drag(self, sender: Any, app_data: Any, user_data: Any) -> None:
+        value = dpg.get_value(sender)
+        try:
+            self._update_selected_spin_frequency(int(user_data), float(value))
+        except (TypeError, ValueError):
+            return
+
+    def _on_spin_coupling_drag(self, sender: Any, app_data: Any, user_data: Any) -> None:
+        value = dpg.get_value(sender)[0]
+        try:
+            i, j, midpoint = user_data
+            new_coupling = float(value) - float(midpoint)
+            dpg.set_value(sender, [value, 0])
+            self._update_selected_spin_coupling(int(i), int(j), new_coupling)
+            if dpg.does_item_exist(sender):
+                dpg.set_value(sender, (float(value), 0.0))
+        except (TypeError, ValueError):
+            return
+
     def _get_active_spin_ids(self) -> list[str]:
         """Return the currently selected spin ids from the UI selector."""
         if not dpg.does_item_exist("spin_selection_combo"):
@@ -195,6 +250,8 @@ class GUI:
 
     def _refresh_main_plot(self) -> None:
         """Delete and re-add all line series on the main plot."""
+        self._clear_interactive_handles()
+
         # clear existing series
         if dpg.does_item_exist("main_plot_xaxis"):
             children = dpg.get_item_children("main_plot_xaxis", slot=1) or []
@@ -261,6 +318,42 @@ class GUI:
                 tag=spin_series_tag,
             )
             dpg.bind_item_theme(spin_series_tag, series_theme)
+
+            if sf.get_id() == self._selected_spin_id:
+                spin = sf.get_data()
+                for idx, freq in enumerate(spin.nuclei_frequencies):
+                    handle_tag = f"spin_freq_handle_{sf.get_id()}_{idx}"
+                    self._interactive_handle_tags.add(handle_tag)
+                    color = sf.get_color()
+                    dpg.add_drag_line(
+                        tag=handle_tag,
+                        parent="main_plot",
+                        default_value=float(freq),
+                        color=(color[0], color[1], color[2], int(color[3] * 0.75)),
+                        thickness=1.5,
+                        show_label=False,
+                        vertical=True,
+                        callback=self._on_spin_frequency_drag,
+                        user_data=idx,
+                    )
+
+                for i in range(spin._nuclei_number):
+                    for j in range(i + 1, spin._nuclei_number):
+                        midpoint = 0.5 * (float(spin.nuclei_frequencies[i]) + float(spin.nuclei_frequencies[j]))
+                        current_coupling = float(spin.couplings[i, j]) # type: ignore
+                        point_x = midpoint + current_coupling
+                        point_tag = f"spin_coupling_handle_{sf.get_id()}_{i}_{j}"
+                        self._interactive_handle_tags.add(point_tag)
+                        dpg.add_drag_point(
+                            tag=point_tag,
+                            parent="main_plot",
+                            default_value=(point_x, 0.0),
+                            color=sf.get_color(),
+                            thickness=3.0,
+                            show_label=False,
+                            callback=self._on_spin_coupling_drag,
+                            user_data=(i, j, midpoint),
+                        )
 
     def _refresh_subplot_row(self) -> None:
         """Rebuild the bottom subplot row."""
@@ -592,7 +685,7 @@ class GUI:
 
         dpg.create_viewport(title=self._title, decorated=True, **viewport_kwargs)
         dpg.setup_dearpygui()
-
+        # dpg.show_item_registry()
         self._render_main_window()
 
         # Load any CLI-supplied files *after* the window is built

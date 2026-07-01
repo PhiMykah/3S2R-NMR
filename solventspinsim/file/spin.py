@@ -16,7 +16,7 @@ class SpinFile:
         self, path: Path, data: Spin, color: tuple[int, int, int, int]
     ) -> None:
         SpinFile._id_counter += 1
-        self._id: str = f"nmrfile_{SpinFile._id_counter}"
+        self._id: str = f"spinfile_{SpinFile._id_counter}"
         self._path: Path = path
         self._data: Spin = data  # shape (2, N)
         self._color: tuple[int, int, int, int] = color
